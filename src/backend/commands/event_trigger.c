@@ -145,7 +145,11 @@ CreateEventTrigger(CreateEventTrigStmt *stmt)
 		strcmp(stmt->eventname, "ddl_command_end") != 0 &&
 		strcmp(stmt->eventname, "sql_drop") != 0 &&
 		strcmp(stmt->eventname, "login") != 0 &&			// 用户登录时触发
-		strcmp(stmt->eventname, "table_rewrite") != 0)
+		strcmp(stmt->eventname, "table_rewrite") != 0 &&
+		strcmp(stmt->eventname, "logout") != 0 &&
+		strcmp(stmt->eventname, "idle_timeout") != 0 &&
+		strcmp(stmt->eventname, "startup") != 0 &&
+		strcmp(stmt->eventname, "shutdown") != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 errmsg("unrecognized event name \"%s\"",
@@ -181,6 +185,22 @@ CreateEventTrigger(CreateEventTrigStmt *stmt)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("tag filtering is not supported for login event triggers")));
+	else if (strcmp(stmt->eventname, "logout") == 0 && tags != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("tag filtering is not supported for logout event triggers")));
+	else if (strcmp(stmt->eventname, "idle_timeout") == 0 && tags != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("tag filtering is not supported for idle_timeout event triggers")));
+	else if (strcmp(stmt->eventname, "startup") == 0 && tags != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("tag filtering is not supported for startup event triggers")));
+	else if (strcmp(stmt->eventname, "shutdown") == 0 && tags != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("tag filtering is not supported for shutdown event triggers")));
 
 	/*
 	 * Give user a nice error message if an event trigger of the same name
@@ -327,6 +347,11 @@ insert_event_trigger_tuple(const char *trigname, const char *eventname, Oid evtO
 	if (strcmp(eventname, "login") == 0)
 		SetDatabaseHasLoginEventTriggers();
 
+	// if(strcmp(eventname, "logout") == 0){	
+	//	SetDatabaseHasLogoutEventTriggers();
+	// }
+	// 如果仿照 dathasloginevt 需要增加 pg_database 中的标志位，需要修改 src/include/catalog/pg_database.h
+
 	/* Depend on owner. */
 	recordDependencyOnOwner(EventTriggerRelationId, trigoid, evtOwner);
 
@@ -462,11 +487,15 @@ AlterEventTrigger(AlterEventTrigStmt *stmt)
 
 	/*
 	 * Login event triggers have an additional flag in pg_database to enable
-	 * faster lookups in hot codepaths. Set the flag unless already True.
+	 * faster lookups in hot codepaths. Set the flag unless already True. 同样设置 pg_database 中的标志
 	 */
 	if (namestrcmp(&evtForm->evtevent, "login") == 0 &&
 		tgenabled != TRIGGER_DISABLED)
 		SetDatabaseHasLoginEventTriggers();
+
+	// if (namestrcmp(&evtForm->evtevent, "logout") == 0 &&
+	// 	tgenabled != TRIGGER_DISABLED)
+	// 	SetDatabaseHasLogoutEventTriggers();
 
 	InvokeObjectPostAlterHook(EventTriggerRelationId,
 							  trigoid, 0);
@@ -1010,6 +1039,107 @@ EventTriggerOnLogin(void)
 	CommitTransactionCommand();		// 提交事务
 }
 
+void
+EventTriggerOnLogout(void)
+{
+	List	   *runlist;
+	EventTriggerData trigdata;
+
+	/*
+	 * 执行条件：多进程、启用了事件触发器、数据库连接有效、有登出事件触发器
+	 */
+	// if (!IsUnderPostmaster || !event_triggers ||
+	// 	!OidIsValid(MyDatabaseId) || !MyDatabaseHasLoginEventTriggers)	// MyDatabaseHasLoginEventTriggers 需要用到系统表标志位
+	// 	return;
+
+	StartTransactionCommand();			// 开启一个新的事务命令
+	runlist = EventTriggerCommonSetup(NULL,					//获取需要执行的触发器列表
+									  EVT_Login, "logout",
+									  &trigdata, false);
+
+	if (runlist != NIL)
+	{
+		/*
+		 * Event trigger execution may require an active snapshot. 设置活动快照（用于触发器执行时的数据库状态）
+		 */
+		PushActiveSnapshot(GetTransactionSnapshot());
+
+		/* Run the triggers. 执行触发器*/
+		EventTriggerInvoke(runlist, &trigdata);
+
+		/* Cleanup. 清理触发器列表*/
+		list_free(runlist);
+
+		PopActiveSnapshot();	// 恢复快照
+	}
+
+	/*
+	 * 如果没有触发器存在，尝试清除标志位
+	 * 条件锁：尝试获取锁，但不会阻塞等待。如果获取不到锁，就直接放弃更新标志位，避免了连接被阻塞
+	 */
+	// else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId,
+	// 									 0, AccessExclusiveLock))
+	// {
+	// 	/*
+	// 	 * The lock is held.  Now we need to recheck that login event triggers
+	// 	 * list is still empty.  Once the list is empty, we know that even if
+	// 	 * there is a backend which concurrently inserts/enables a login event
+	// 	 * trigger, it will update pg_database.dathasloginevt *afterwards*.
+	// 	 */
+	// 	runlist = EventTriggerCommonSetup(NULL,
+	// 									  EVT_Login, "login",
+	// 									  &trigdata, true);
+
+	// 	if (runlist == NIL)
+	// 	{
+	// 		Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+	// 		HeapTuple	tuple;
+	// 		void	   *state;
+	// 		Form_pg_database db;
+	// 		ScanKeyData key[1];
+
+	// 		/* Fetch a copy of the tuple to scribble on */
+	// 		ScanKeyInit(&key[0],
+	// 					Anum_pg_database_oid,
+	// 					BTEqualStrategyNumber, F_OIDEQ,
+	// 					ObjectIdGetDatum(MyDatabaseId));
+
+	// 		systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true,
+	// 									  NULL, 1, key, &tuple, &state);
+
+	// 		if (!HeapTupleIsValid(tuple))
+	// 			elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
+
+	// 		db = (Form_pg_database) GETSTRUCT(tuple);
+	// 		if (db->dathasloginevt)
+	// 		{
+	// 			db->dathasloginevt = false;
+
+	// 			/*
+	// 			 * Do an "in place" update of the pg_database tuple.  Doing
+	// 			 * this instead of regular updates serves two purposes. First,
+	// 			 * that avoids possible waiting on the row-level lock. Second,
+	// 			 * that avoids dealing with TOAST.
+	// 			 *
+	// 			 * Changes made by inplace update may be lost due to
+	// 			 * concurrent normal updates; see inplace-inval.spec. However,
+	// 			 * we are OK with that.  The subsequent connections will still
+	// 			 * have a chance to set "dathasloginevt" to false.
+	// 			 */
+	// 			systable_inplace_update_finish(state, tuple);
+	// 		}
+	// 		else
+	// 			systable_inplace_update_cancel(state);
+	// 		table_close(pg_db, RowExclusiveLock);
+	// 		heap_freetuple(tuple);
+	// 	}
+	// 	else
+	// 	{
+	// 		list_free(runlist);
+	// 	}
+	// }
+	CommitTransactionCommand();		// 提交事务
+}
 
 /*
  * Fire table_rewrite triggers.
