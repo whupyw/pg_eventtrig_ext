@@ -1,0 +1,86 @@
+-- Logout event triggers
+CREATE TABLE user_logouts(id serial, who text);
+GRANT SELECT ON user_logouts TO public;
+CREATE FUNCTION on_logout_proc() RETURNS event_trigger AS $$
+BEGIN
+  INSERT INTO user_logouts (who) VALUES (SESSION_USER);
+  RAISE NOTICE 'ByeBye!';
+END;
+$$ LANGUAGE plpgsql;
+CREATE EVENT TRIGGER on_logout_trigger ON logout EXECUTE PROCEDURE on_logout_proc();
+ALTER EVENT TRIGGER on_logout_trigger ENABLE ALWAYS;
+
+exit
+\c
+NOTICE:  ByeBye!
+SELECT COUNT(*) FROM user_logins;
+ count 
+-------
+     1
+(1 row)
+
+-- Check dathaslogoutevt in system catalog
+SELECT dathaslogoutevt FROM pg_database WHERE datname= :'DBNAME';
+ dathaslogoutevt 
+----------------
+ t
+(1 row)
+
+-- Cleanup
+DROP TABLE user_logouts;
+DROP EVENT TRIGGER on_logout_trigger;
+DROP FUNCTION on_logout_proc();
+\c
+
+
+SELECT * FROM pg_event_trigger;
+
+上面那个要客户端输出的因为客户端断开了，无法输出
+
+
+-- 创建用于记录用户登出信息的表
+CREATE TABLE user_logouts (
+    id SERIAL PRIMARY KEY,
+    who TEXT NOT NULL,
+    logout_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建事件触发器函数-- 插入用户登出信息到 user_logouts 表中-- 不需要客户端输出，所以没有 RAISE NOTICE 或其他输出语句
+CREATE FUNCTION on_logout_proc() RETURNS EVENT_TRIGGER AS $$
+DECLARE
+BEGIN
+    INSERT INTO user_logouts (who)
+    VALUES (SESSION_USER);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 创建登出事件触发器
+CREATE EVENT TRIGGER on_logout_trigger ON LOGOUT EXECUTE PROCEDURE on_logout_proc();
+
+-- 启用事件触发器
+ALTER EVENT TRIGGER on_logout_trigger ENABLE ALWAYS;
+
+这个测试可用
+postgres=# \c
+You are now connected to database "postgres" as user "cjw".
+postgres=# SELECT * FROM user_logouts;
+ id | who | logout_time 
+----+-----+-------------
+(0 rows)
+
+postgres=# \c
+You are now connected to database "postgres" as user "cjw".
+postgres=# SELECT * FROM user_logouts;
+ id | who |          logout_time          
+----+-----+-------------------------------
+  1 | cjw | 2025-03-18 01:23:10.208905+08
+(1 row)
+
+postgres=# \c
+You are now connected to database "postgres" as user "cjw".
+postgres=# SELECT * FROM user_logouts;
+ id | who |          logout_time          
+----+-----+-------------------------------
+  1 | cjw | 2025-03-18 01:23:10.208905+08
+  2 | cjw | 2025-03-18 01:23:16.286103+08
+(2 rows)

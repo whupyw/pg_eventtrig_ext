@@ -4797,6 +4797,8 @@ release_conn_addrinfo(PGconn *conn)
 static void
 sendTerminateConn(PGconn *conn)
 {
+	// 啊啊啊啊啊啊
+	
 	/*
 	 * The Postgres cancellation protocol does not have a notion of a
 	 * Terminate message, so don't send one.

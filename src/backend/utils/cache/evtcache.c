@@ -168,6 +168,8 @@ BuildEventTriggerCache(void)
 			event = EVT_TableRewrite;
 		else if (strcmp(evtevent, "login") == 0)
 			event = EVT_Login;
+		else if (strcmp(evtevent, "logout") == 0)
+			event = EVT_Logout;
 		else
 			continue;
 

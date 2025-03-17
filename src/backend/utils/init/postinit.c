@@ -1115,6 +1115,7 @@ InitPostgres(const char *in_dbname, Oid dboid,
 
 		MyDatabaseTableSpace = datform->dattablespace;
 		MyDatabaseHasLoginEventTriggers = datform->dathasloginevt;
+		MyDatabaseHasLogoutEventTriggers = datform->dathaslogoutevt;
 		/* pass the database name back to the caller */
 		if (out_dbname)
 			strcpy(out_dbname, dbname);

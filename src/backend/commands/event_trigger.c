@@ -112,6 +112,7 @@ static void EventTriggerInvoke(List *fn_oid_list, EventTriggerData *trigdata);
 static const char *stringify_grant_objtype(ObjectType objtype);
 static const char *stringify_adefprivs_objtype(ObjectType objtype);
 static void SetDatabaseHasLoginEventTriggers(void);
+static void SetDatabaseHasLogoutEventTriggers(void);
 
 /*
  * Create an event trigger.
@@ -144,7 +145,7 @@ CreateEventTrigger(CreateEventTrigStmt *stmt)
 	if (strcmp(stmt->eventname, "ddl_command_start") != 0 &&
 		strcmp(stmt->eventname, "ddl_command_end") != 0 &&
 		strcmp(stmt->eventname, "sql_drop") != 0 &&
-		strcmp(stmt->eventname, "login") != 0 &&			// 用户登录时触发
+		strcmp(stmt->eventname, "login") != 0 &&
 		strcmp(stmt->eventname, "table_rewrite") != 0 &&
 		strcmp(stmt->eventname, "logout") != 0 &&
 		strcmp(stmt->eventname, "idle_timeout") != 0 &&
@@ -347,10 +348,9 @@ insert_event_trigger_tuple(const char *trigname, const char *eventname, Oid evtO
 	if (strcmp(eventname, "login") == 0)
 		SetDatabaseHasLoginEventTriggers();
 
-	// if(strcmp(eventname, "logout") == 0){	
-	//	SetDatabaseHasLogoutEventTriggers();
-	// }
-	// 如果仿照 dathasloginevt 需要增加 pg_database 中的标志位，需要修改 src/include/catalog/pg_database.h
+	if(strcmp(eventname, "logout") == 0){	
+		SetDatabaseHasLogoutEventTriggers();
+	}
 
 	/* Depend on owner. */
 	recordDependencyOnOwner(EventTriggerRelationId, trigoid, evtOwner);
@@ -452,6 +452,44 @@ SetDatabaseHasLoginEventTriggers(void)
 }
 
 /*
+ * Set pg_database.dathaslogoutevt flag for current database indicating that
+ * current database has on logout event triggers.
+ */
+void
+SetDatabaseHasLogoutEventTriggers(void)
+{
+	/* Set dathaslogoutevt flag in pg_database */
+	Form_pg_database db;
+	Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+	ItemPointerData otid;
+	HeapTuple	tuple;
+
+	/*
+	 * Use shared lock to prevent a conflict with EventTriggerOnLogout() trying
+	 * to reset pg_database.dathaslogoutevt flag.  Note, this lock doesn't
+	 * effectively blocks database or other objection.  It's just custom lock
+	 * tag used to prevent multiple backends changing
+	 * pg_database.dathaslogoutevt flag.
+	 */
+	LockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock);
+
+	tuple = SearchSysCacheLockedCopy1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for database %u", MyDatabaseId);
+	otid = tuple->t_self;
+	db = (Form_pg_database) GETSTRUCT(tuple);
+	if (!db->dathaslogoutevt)
+	{
+		db->dathaslogoutevt = true;
+		CatalogTupleUpdate(pg_db, &otid, tuple);
+		CommandCounterIncrement();
+	}
+	UnlockTuple(pg_db, &otid, InplaceUpdateTupleLock);
+	table_close(pg_db, RowExclusiveLock);
+	heap_freetuple(tuple);
+}
+
+/*
  * ALTER EVENT TRIGGER foo ENABLE|DISABLE|ENABLE ALWAYS|REPLICA
  */
 Oid
@@ -493,9 +531,9 @@ AlterEventTrigger(AlterEventTrigStmt *stmt)
 		tgenabled != TRIGGER_DISABLED)
 		SetDatabaseHasLoginEventTriggers();
 
-	// if (namestrcmp(&evtForm->evtevent, "logout") == 0 &&
-	// 	tgenabled != TRIGGER_DISABLED)
-	// 	SetDatabaseHasLogoutEventTriggers();
+	if (namestrcmp(&evtForm->evtevent, "logout") == 0 &&
+		tgenabled != TRIGGER_DISABLED)
+		SetDatabaseHasLogoutEventTriggers();
 
 	InvokeObjectPostAlterHook(EventTriggerRelationId,
 							  trigoid, 0);
@@ -660,6 +698,8 @@ EventTriggerGetTag(Node *parsetree, EventTriggerEvent event)
 {
 	if (event == EVT_Login)
 		return CMDTAG_LOGIN;
+	else if (event == EVT_Logout)
+		return CMDTAG_LOGOUT;
 	else
 		return CreateCommandTag(parsetree);
 }
@@ -702,7 +742,8 @@ EventTriggerCommonSetup(Node *parsetree,
 		if (event == EVT_DDLCommandStart ||
 			event == EVT_DDLCommandEnd ||
 			event == EVT_SQLDrop ||
-			event == EVT_Login)
+			event == EVT_Login ||
+			event == EVT_Logout)
 		{
 			if (!command_tag_event_trigger_ok(dbgtag))
 				elog(ERROR, "unexpected command tag \"%s\"", GetCommandTagName(dbgtag));
@@ -1048,13 +1089,13 @@ EventTriggerOnLogout(void)
 	/*
 	 * 执行条件：多进程、启用了事件触发器、数据库连接有效、有登出事件触发器
 	 */
-	// if (!IsUnderPostmaster || !event_triggers ||
-	// 	!OidIsValid(MyDatabaseId) || !MyDatabaseHasLoginEventTriggers)	// MyDatabaseHasLoginEventTriggers 需要用到系统表标志位
-	// 	return;
+	if (!IsUnderPostmaster || !event_triggers ||
+		!OidIsValid(MyDatabaseId) || !MyDatabaseHasLogoutEventTriggers)	
+		return;
 
 	StartTransactionCommand();			// 开启一个新的事务命令
 	runlist = EventTriggerCommonSetup(NULL,					//获取需要执行的触发器列表
-									  EVT_Login, "logout",
+									  EVT_Logout, "logout",
 									  &trigdata, false);
 
 	if (runlist != NIL)
@@ -1077,67 +1118,61 @@ EventTriggerOnLogout(void)
 	 * 如果没有触发器存在，尝试清除标志位
 	 * 条件锁：尝试获取锁，但不会阻塞等待。如果获取不到锁，就直接放弃更新标志位，避免了连接被阻塞
 	 */
-	// else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId,
-	// 									 0, AccessExclusiveLock))
-	// {
-	// 	/*
-	// 	 * The lock is held.  Now we need to recheck that login event triggers
-	// 	 * list is still empty.  Once the list is empty, we know that even if
-	// 	 * there is a backend which concurrently inserts/enables a login event
-	// 	 * trigger, it will update pg_database.dathasloginevt *afterwards*.
-	// 	 */
-	// 	runlist = EventTriggerCommonSetup(NULL,
-	// 									  EVT_Login, "login",
-	// 									  &trigdata, true);
+	else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId,
+										 0, AccessExclusiveLock))
+	{
+		runlist = EventTriggerCommonSetup(NULL,
+										  EVT_Logout, "logout",
+										  &trigdata, true);
 
-	// 	if (runlist == NIL)
-	// 	{
-	// 		Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
-	// 		HeapTuple	tuple;
-	// 		void	   *state;
-	// 		Form_pg_database db;
-	// 		ScanKeyData key[1];
+		if (runlist == NIL)
+		{
+			Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+			HeapTuple	tuple;
+			void	   *state;
+			Form_pg_database db;
+			ScanKeyData key[1];
 
-	// 		/* Fetch a copy of the tuple to scribble on */
-	// 		ScanKeyInit(&key[0],
-	// 					Anum_pg_database_oid,
-	// 					BTEqualStrategyNumber, F_OIDEQ,
-	// 					ObjectIdGetDatum(MyDatabaseId));
+			/* Fetch a copy of the tuple to scribble on */
+			ScanKeyInit(&key[0],
+						Anum_pg_database_oid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(MyDatabaseId));
 
-	// 		systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true,
-	// 									  NULL, 1, key, &tuple, &state);
+			systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true,
+										  NULL, 1, key, &tuple, &state);
 
-	// 		if (!HeapTupleIsValid(tuple))
-	// 			elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
 
-	// 		db = (Form_pg_database) GETSTRUCT(tuple);
-	// 		if (db->dathasloginevt)
-	// 		{
-	// 			db->dathasloginevt = false;
+			db = (Form_pg_database) GETSTRUCT(tuple);
+			if (db->dathaslogoutevt)
+			{
+				db->dathaslogoutevt = false;
 
-	// 			/*
-	// 			 * Do an "in place" update of the pg_database tuple.  Doing
-	// 			 * this instead of regular updates serves two purposes. First,
-	// 			 * that avoids possible waiting on the row-level lock. Second,
-	// 			 * that avoids dealing with TOAST.
-	// 			 *
-	// 			 * Changes made by inplace update may be lost due to
-	// 			 * concurrent normal updates; see inplace-inval.spec. However,
-	// 			 * we are OK with that.  The subsequent connections will still
-	// 			 * have a chance to set "dathasloginevt" to false.
-	// 			 */
-	// 			systable_inplace_update_finish(state, tuple);
-	// 		}
-	// 		else
-	// 			systable_inplace_update_cancel(state);
-	// 		table_close(pg_db, RowExclusiveLock);
-	// 		heap_freetuple(tuple);
-	// 	}
-	// 	else
-	// 	{
-	// 		list_free(runlist);
-	// 	}
-	// }
+				/*
+				 * Do an "in place" update of the pg_database tuple.  Doing
+				 * this instead of regular updates serves two purposes. First,
+				 * that avoids possible waiting on the row-level lock. Second,
+				 * that avoids dealing with TOAST.
+				 *
+				 * Changes made by inplace update may be lost due to
+				 * concurrent normal updates; see inplace-inval.spec. However,
+				 * we are OK with that.  The subsequent connections will still
+				 * have a chance to set "dathaslogoutevt" to false.
+				 */
+				systable_inplace_update_finish(state, tuple);
+			}
+			else
+				systable_inplace_update_cancel(state);
+			table_close(pg_db, RowExclusiveLock);
+			heap_freetuple(tuple);
+		}
+		else
+		{
+			list_free(runlist);
+		}
+	}
 	CommitTransactionCommand();		// 提交事务
 }
 
@@ -1257,7 +1292,7 @@ EventTriggerInvoke(List *fn_oid_list, EventTriggerData *trigdata)
 		InitFunctionCallInfoData(*fcinfo, &flinfo, 0,
 								 InvalidOid, (Node *) trigdata, NULL);
 		pgstat_init_function_usage(fcinfo, &fcusage);
-		FunctionCallInvoke(fcinfo);
+		FunctionCallInvoke(fcinfo);					// 这里执行事件触发器关联的函数
 		pgstat_end_function_usage(&fcusage, true);
 
 		/* Reclaim memory. */

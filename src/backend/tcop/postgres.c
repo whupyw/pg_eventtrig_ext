@@ -4978,12 +4978,14 @@ PostgresMain(const char *dbname, const char *username)
 
 				/* FALLTHROUGH */
 
-			case PqMsg_Terminate:	// 客户端希望主动关闭连接 // 登出？
+			case PqMsg_Terminate:	// 客户端希望主动关闭连接 // 登出
 
 				/*
 				 * Reset whereToSendOutput to prevent ereport from attempting
 				 * to send any more messages to client.
 				 */
+				EventTriggerOnLogout(); // Could not send data to client的调用堆栈显示确实是这个地方进去了
+
 				if (whereToSendOutput == DestRemote)
 					whereToSendOutput = DestNone;
 

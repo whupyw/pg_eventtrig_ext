@@ -1,3 +1,11 @@
 {
-    "commentTranslate.source": "DarkCWK.youdao-youdao"
+    "commentTranslate.source": "DarkCWK.youdao-youdao",
+    "files.associations": {
+        "command.h": "c",
+        "event_trigger.h": "c",
+        "logging.h": "c",
+        "string.h": "c",
+        "sinval.h": "c",
+        "procsignal.h": "c"
+    }
 }
