@@ -1,0 +1,125 @@
+-- idle_itmeout event triggers
+CREATE TABLE idle_timeouts(id serial, who text);
+GRANT SELECT ON idle_timeouts TO public;
+CREATE FUNCTION on_idle_timeout_proc() RETURNS event_trigger AS $$
+BEGIN
+  INSERT INTO idle_timeouts (who) VALUES (SESSION_USER);
+  RAISE NOTICE 'Idle timeout. ByeBye!';
+END;
+$$ LANGUAGE plpgsql;
+CREATE EVENT TRIGGER on_idle_timeout_trigger ON idle_timeout EXECUTE PROCEDURE on_idle_timeout_proc();
+ALTER EVENT TRIGGER on_idle_timeout_trigger ENABLE ALWAYS;
+
+postgres=# set idle_session_timeout = 10000;
+SET
+postgres=# show idle_session_timeout;
+ idle_session_timeout 
+----------------------
+ 10s
+(1 row)
+
+-- 等待10s输入任意命令
+
+NOTICE:  Idle timeout. ByeBye!
+FATAL:  terminating connection due to idle-in-transaction timeout
+server closed the connection unexpectedly
+        This probably means the server terminated abnormally
+        before or while processing the request.
+The connection to the server was lost. Attempting reset: Succeeded.
+
+SELECT COUNT(*) FROM idle_timeouts;
+ count 
+-------
+     1
+(1 row)
+
+-- 需要在无idletimeout事件触发器时再次让会话空闲超时才会改为f
+SELECT dathasidletimeoutevt FROM pg_database WHERE datname= :'DBNAME';
+ dathaslogoutevt 
+----------------
+ t
+(1 row)
+
+-- Cleanup
+DROP TABLE idle_timeouts;
+DROP EVENT TRIGGER on_idle_timeout_trigger;
+DROP FUNCTION on_idle_timeout_proc();
+\c
+
+SELECT * FROM pg_event_trigger;
+
+
+----------------------------------------------------------------------------------------------------
+-- 创建用于记录用户会话超时信息的表
+
+CREATE TABLE idle_timeouts (
+    id SERIAL PRIMARY KEY,
+    who TEXT NOT NULL,
+    timeout_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建事件触发器函数
+
+CREATE FUNCTION on_idle_timeout_proc() RETURNS EVENT_TRIGGER AS $$
+DECLARE
+BEGIN
+    INSERT INTO idle_timeouts (who)
+    VALUES (SESSION_USER);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 创建 idle_timeout 事件触发器、启用事件触发器
+
+CREATE EVENT TRIGGER on_idle_timeout_trigger ON idle_timeout EXECUTE PROCEDURE on_idle_timeout_proc();
+
+ALTER EVENT TRIGGER on_idle_timeout_trigger ENABLE ALWAYS;
+
+postgres=# set idle_session_timeout = 10000;
+SET
+postgres=# show idle_session_timeout;
+ idle_session_timeout 
+----------------------
+ 10s
+(1 row)
+
+-- 测试用例
+-- 初始状态：表中没有记录。
+postgres=# SELECT * FROM idle_timeouts;
+ id | who | timeout_time 
+----+-----+-------------
+(0 rows)
+
+-- 模拟用户会话超时：假设用户会话空闲了一段时间后触发 idle_timeout 事件。
+
+postgres=# SELECT * FROM idle_timeouts;
+FATAL:  terminating connection due to idle-session timeout
+server closed the connection unexpectedly
+        This probably means the server terminated abnormally
+        before or while processing the request.
+The connection to the server was lost. Attempting reset: Succeeded.
+postgres=# SELECT * FROM idle_timeouts;
+ id | who |         timeout_time          
+----+-----+-------------------------------
+  1 | cjw | 2025-04-03 21:32:37.039297+08
+(1 row)
+
+-- 再次模拟用户会话超时：
+-- set只用于单次对话，实现多次对话set可以改/usr/local/pgsql/data/postgresql.conf中的idle_session_timeout或者源码IdleSessionTimeout
+postgres=# set idle_session_timeout = 10000;
+SET
+
+-- 等待10s
+
+postgres=# SELECT * FROM idle_timeouts;
+FATAL:  terminating connection due to idle-session timeout
+server closed the connection unexpectedly
+        This probably means the server terminated abnormally
+        before or while processing the request.
+The connection to the server was lost. Attempting reset: Succeeded.
+postgres=# SELECT * FROM idle_timeouts;
+ id | who |         timeout_time          
+----+-----+-------------------------------
+  1 | cjw | 2025-04-03 21:32:37.039297+08
+  2 | cjw | 2025-04-03 21:34:09.346896+08
+(2 rows)
+

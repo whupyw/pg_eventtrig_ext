@@ -113,6 +113,9 @@ static const char *stringify_grant_objtype(ObjectType objtype);
 static const char *stringify_adefprivs_objtype(ObjectType objtype);
 static void SetDatabaseHasLoginEventTriggers(void);
 static void SetDatabaseHasLogoutEventTriggers(void);
+static void SetDatabaseHasIdletimeoutEventTriggers(void);
+static void SetDatabaseHasStartupEventTriggers(void);
+static void SetDatabaseHasShutdownEventTriggers(void);
 
 /*
  * Create an event trigger.
@@ -351,6 +354,15 @@ insert_event_trigger_tuple(const char *trigname, const char *eventname, Oid evtO
 	if(strcmp(eventname, "logout") == 0){	
 		SetDatabaseHasLogoutEventTriggers();
 	}
+	if(strcmp(eventname, "idle_timeout") == 0){	
+		SetDatabaseHasIdletimeoutEventTriggers();
+	}
+	if(strcmp(eventname, "startup") == 0){	
+		SetDatabaseHasStartupEventTriggers();
+	}
+	if(strcmp(eventname, "shutdown") == 0){	
+		SetDatabaseHasShutdownEventTriggers();
+	}
 
 	/* Depend on owner. */
 	recordDependencyOnOwner(EventTriggerRelationId, trigoid, evtOwner);
@@ -489,6 +501,85 @@ SetDatabaseHasLogoutEventTriggers(void)
 	heap_freetuple(tuple);
 }
 
+void
+SetDatabaseHasIdletimeoutEventTriggers(void)
+{
+	Form_pg_database db;
+	Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+	ItemPointerData otid;
+	HeapTuple	tuple;
+
+	LockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock);
+
+	tuple = SearchSysCacheLockedCopy1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for database %u", MyDatabaseId);
+	otid = tuple->t_self;
+	db = (Form_pg_database) GETSTRUCT(tuple);
+	if (!db->dathasidletimeoutevt)
+	{
+		db->dathasidletimeoutevt = true;
+		CatalogTupleUpdate(pg_db, &otid, tuple);
+		CommandCounterIncrement();
+	}
+	UnlockTuple(pg_db, &otid, InplaceUpdateTupleLock);
+	table_close(pg_db, RowExclusiveLock);
+	heap_freetuple(tuple);
+}
+
+void
+SetDatabaseHasStartupEventTriggers(void)
+{
+	Form_pg_database db;
+	Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+	ItemPointerData otid;
+	HeapTuple	tuple;
+
+	LockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock);
+
+	tuple = SearchSysCacheLockedCopy1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for database %u", MyDatabaseId);
+	otid = tuple->t_self;
+	db = (Form_pg_database) GETSTRUCT(tuple);
+	if (!db->dathasstartupevt)
+	{
+		db->dathasstartupevt = true;
+		MyDatabaseHasStartupEventTriggers = true;
+		CatalogTupleUpdate(pg_db, &otid, tuple);
+		CommandCounterIncrement();
+	}
+	UnlockTuple(pg_db, &otid, InplaceUpdateTupleLock);
+	table_close(pg_db, RowExclusiveLock);
+	heap_freetuple(tuple);
+}
+
+void
+SetDatabaseHasShutdownEventTriggers(void)
+{
+	Form_pg_database db;
+	Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+	ItemPointerData otid;
+	HeapTuple	tuple;
+
+	LockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock);
+
+	tuple = SearchSysCacheLockedCopy1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for database %u", MyDatabaseId);
+	otid = tuple->t_self;
+	db = (Form_pg_database) GETSTRUCT(tuple);
+	if (!db->dathasshutdownevt)
+	{
+		db->dathasshutdownevt = true;
+		CatalogTupleUpdate(pg_db, &otid, tuple);
+		CommandCounterIncrement();
+	}
+	UnlockTuple(pg_db, &otid, InplaceUpdateTupleLock);
+	table_close(pg_db, RowExclusiveLock);
+	heap_freetuple(tuple);
+}
+
 /*
  * ALTER EVENT TRIGGER foo ENABLE|DISABLE|ENABLE ALWAYS|REPLICA
  */
@@ -534,6 +625,18 @@ AlterEventTrigger(AlterEventTrigStmt *stmt)
 	if (namestrcmp(&evtForm->evtevent, "logout") == 0 &&
 		tgenabled != TRIGGER_DISABLED)
 		SetDatabaseHasLogoutEventTriggers();
+
+	if (namestrcmp(&evtForm->evtevent, "idle_timeout") == 0 &&
+		tgenabled != TRIGGER_DISABLED)
+		SetDatabaseHasIdletimeoutEventTriggers();
+
+	if (namestrcmp(&evtForm->evtevent, "startup") == 0 &&
+		tgenabled != TRIGGER_DISABLED)
+		SetDatabaseHasStartupEventTriggers();
+
+	if (namestrcmp(&evtForm->evtevent, "shutdown") == 0 &&
+		tgenabled != TRIGGER_DISABLED)
+		SetDatabaseHasShutdownEventTriggers();
 
 	InvokeObjectPostAlterHook(EventTriggerRelationId,
 							  trigoid, 0);
@@ -700,6 +803,12 @@ EventTriggerGetTag(Node *parsetree, EventTriggerEvent event)
 		return CMDTAG_LOGIN;
 	else if (event == EVT_Logout)
 		return CMDTAG_LOGOUT;
+	else if (event == EVT_IdleTimeout)
+		return CMDTAG_IDLETIMEOUT;
+	else if (event == EVT_Startup)
+		return CMDTAG_STARTUP;
+	else if (event == EVT_Shutdown)
+		return CMDTAG_SHUTDOWN;
 	else
 		return CreateCommandTag(parsetree);
 }
@@ -743,7 +852,10 @@ EventTriggerCommonSetup(Node *parsetree,
 			event == EVT_DDLCommandEnd ||
 			event == EVT_SQLDrop ||
 			event == EVT_Login ||
-			event == EVT_Logout)
+			event == EVT_Logout ||
+			event == EVT_IdleTimeout ||
+			event == EVT_Startup ||
+			event == EVT_Shutdown)
 		{
 			if (!command_tag_event_trigger_ok(dbgtag))
 				elog(ERROR, "unexpected command tag \"%s\"", GetCommandTagName(dbgtag));
@@ -1174,6 +1286,173 @@ EventTriggerOnLogout(void)
 		}
 	}
 	CommitTransactionCommand();		// 提交事务
+}
+
+void
+EventTriggerOnIdleTimeout(void)
+{
+	List	   *runlist;
+	EventTriggerData trigdata;
+
+	if (!IsUnderPostmaster || !event_triggers || !OidIsValid(MyDatabaseId) || !MyDatabaseHasIdleTimeoutEventTriggers)	
+		return;
+
+	StartTransactionCommand();
+	runlist = EventTriggerCommonSetup(NULL,	EVT_IdleTimeout, "idle_timeout", &trigdata, false);
+
+	if (runlist != NIL){
+		PushActiveSnapshot(GetTransactionSnapshot());
+		EventTriggerInvoke(runlist, &trigdata);
+		list_free(runlist);
+		PopActiveSnapshot();
+	}
+	else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock)){
+		runlist = EventTriggerCommonSetup(NULL, EVT_IdleTimeout, "idle_timeout", &trigdata, true);
+		if (runlist == NIL){
+			Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+			HeapTuple	tuple;
+			void	   *state;
+			Form_pg_database db;
+			ScanKeyData key[1];
+
+			ScanKeyInit(&key[0], Anum_pg_database_oid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(MyDatabaseId));
+			systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true, NULL, 1, key, &tuple, &state);
+
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
+
+			db = (Form_pg_database) GETSTRUCT(tuple);
+			if (db->dathasidletimeoutevt){
+				db->dathasidletimeoutevt = false;
+				systable_inplace_update_finish(state, tuple);
+			}
+			else
+				systable_inplace_update_cancel(state);
+			table_close(pg_db, RowExclusiveLock);
+			heap_freetuple(tuple);
+		}
+		else{
+			list_free(runlist);
+		}
+	}
+	CommitTransactionCommand();
+}
+
+void
+EventTriggerOnStartup(void)
+{
+	List	   *runlist;
+	EventTriggerData trigdata;
+
+	// 可以进入
+	// fputs((_("EventTriggerOnStartup111\n")), stdout);
+	// fflush(stdout);
+	
+	if (!IsUnderPostmaster || !event_triggers || !OidIsValid(MyDatabaseId) || !MyDatabaseHasShutdownEventTriggers)	
+		return;
+		
+	// if (!event_triggers || !MyDatabaseHasStartupEventTriggers)	
+	// 	return;
+
+	// MyDatabaseHasStartupEventTriggers=false 只有这种情况不return
+	// if (!event_triggers)	
+	// 	return;
+
+	StartTransactionCommand();
+
+	// 无法进入
+	// fputs((_("EventTriggerOnStartup333\n")), stdout);
+	// fflush(stdout);
+
+	runlist = EventTriggerCommonSetup(NULL,	EVT_Startup, "startup", &trigdata, false);
+
+	if (runlist != NIL){
+		PushActiveSnapshot(GetTransactionSnapshot());
+		EventTriggerInvoke(runlist, &trigdata);
+		list_free(runlist);
+		PopActiveSnapshot();
+	}
+	else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock)){
+		runlist = EventTriggerCommonSetup(NULL, EVT_Startup, "startup", &trigdata, true);
+		if (runlist == NIL){
+			Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+			HeapTuple	tuple;
+			void	   *state;
+			Form_pg_database db;
+			ScanKeyData key[1];
+
+			ScanKeyInit(&key[0], Anum_pg_database_oid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(MyDatabaseId));
+			systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true, NULL, 1, key, &tuple, &state);
+
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
+
+			db = (Form_pg_database) GETSTRUCT(tuple);
+			if (db->dathasstartupevt){
+				db->dathasstartupevt = false;
+				MyDatabaseHasStartupEventTriggers = false;
+				systable_inplace_update_finish(state, tuple);
+			}
+			else
+				systable_inplace_update_cancel(state);
+			table_close(pg_db, RowExclusiveLock);
+			heap_freetuple(tuple);
+		}
+		else{
+			list_free(runlist);
+		}
+	}
+	CommitTransactionCommand();
+}
+
+void
+EventTriggerOnShutdown(void)
+{
+	List	   *runlist;
+	EventTriggerData trigdata;
+
+	if (!IsUnderPostmaster || !event_triggers || !OidIsValid(MyDatabaseId) || !MyDatabaseHasShutdownEventTriggers)	
+		return;
+
+	StartTransactionCommand();
+	runlist = EventTriggerCommonSetup(NULL,	EVT_Shutdown, "shutdown", &trigdata, false);
+
+	if (runlist != NIL){
+		PushActiveSnapshot(GetTransactionSnapshot());
+		EventTriggerInvoke(runlist, &trigdata);
+		list_free(runlist);
+		PopActiveSnapshot();
+	}
+	else if (ConditionalLockSharedObject(DatabaseRelationId, MyDatabaseId, 0, AccessExclusiveLock)){
+		runlist = EventTriggerCommonSetup(NULL, EVT_Shutdown, "shutdown", &trigdata, true);
+		if (runlist == NIL){
+			Relation	pg_db = table_open(DatabaseRelationId, RowExclusiveLock);
+			HeapTuple	tuple;
+			void	   *state;
+			Form_pg_database db;
+			ScanKeyData key[1];
+
+			ScanKeyInit(&key[0], Anum_pg_database_oid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(MyDatabaseId));
+			systable_inplace_update_begin(pg_db, DatabaseOidIndexId, true, NULL, 1, key, &tuple, &state);
+
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "could not find tuple for database %u", MyDatabaseId);
+
+			db = (Form_pg_database) GETSTRUCT(tuple);
+			if (db->dathasshutdownevt){
+				db->dathasshutdownevt = false;
+				systable_inplace_update_finish(state, tuple);
+			}
+			else
+				systable_inplace_update_cancel(state);
+			table_close(pg_db, RowExclusiveLock);
+			heap_freetuple(tuple);
+		}
+		else{
+			list_free(runlist);
+		}
+	}
+	CommitTransactionCommand();
 }
 
 /*

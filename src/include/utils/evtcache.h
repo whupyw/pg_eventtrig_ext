@@ -25,6 +25,9 @@ typedef enum
 	EVT_TableRewrite,
 	EVT_Login,
 	EVT_Logout,
+	EVT_IdleTimeout,
+	EVT_Startup,
+	EVT_Shutdown,
 } EventTriggerEvent;
 
 typedef struct

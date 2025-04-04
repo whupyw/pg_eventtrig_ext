@@ -95,6 +95,8 @@
 #include "common/file_utils.h"
 #include "common/ip.h"
 #include "common/pg_prng.h"
+#include "commands/event_trigger.h"
+#include "catalog/pg_database.h"
 #include "lib/ilist.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
@@ -1660,6 +1662,11 @@ ServerLoop(void)
 			 * WaitEventSetWait().
 			 */
 			if (pending_pm_shutdown_request)
+				//cjwcjw
+				// EventTriggerOnShutdown();
+				// fputs((_("cjwcjwcjwshutdown112233\n")), stdout);
+				// fflush(stdout);
+
 				process_pm_shutdown_request();
 			if (pending_pm_reload_request)
 				process_pm_reload_request();
@@ -2479,6 +2486,11 @@ process_pm_child_exit(void)
 
 			/* workers may be scheduled to start now */
 			maybe_start_bgworkers();
+
+			// cjw启动startup：不行。无法启动
+			// EventTriggerOnStartup();
+			// fputs((_("cjwcjwcjw112233\n")), stdout);
+			// fflush(stdout);
 
 			/* at this point we are really open for business */
 			ereport(LOG,

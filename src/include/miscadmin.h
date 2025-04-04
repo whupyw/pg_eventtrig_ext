@@ -209,6 +209,9 @@ extern PGDLLIMPORT Oid MyDatabaseTableSpace;
 extern PGDLLIMPORT bool MyDatabaseHasLoginEventTriggers;
 
 extern PGDLLIMPORT bool MyDatabaseHasLogoutEventTriggers;
+extern PGDLLIMPORT bool	MyDatabaseHasIdleTimeoutEventTriggers;
+extern PGDLLIMPORT bool	MyDatabaseHasStartupEventTriggers;
+extern PGDLLIMPORT bool	MyDatabaseHasShutdownEventTriggers;
 /*
  * Date/Time Configuration
  *

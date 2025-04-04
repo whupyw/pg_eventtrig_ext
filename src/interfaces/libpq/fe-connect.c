@@ -21,7 +21,7 @@
 #include <netdb.h>
 #include <time.h>
 #include <unistd.h>
-
+// #include "commands/event_trigger.h"
 #include "common/ip.h"
 #include "common/link-canary.h"
 #include "common/scram-common.h"
@@ -4797,7 +4797,8 @@ release_conn_addrinfo(PGconn *conn)
 static void
 sendTerminateConn(PGconn *conn)
 {
-	// 啊啊啊啊啊啊
+	// 客户端子进程发送终止消息
+	// EventTriggerOnLogout(); // 编译不通过，奇怪的问题
 	
 	/*
 	 * The Postgres cancellation protocol does not have a notion of a

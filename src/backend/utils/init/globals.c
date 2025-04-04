@@ -95,6 +95,9 @@ Oid			MyDatabaseTableSpace = InvalidOid;
 bool		MyDatabaseHasLoginEventTriggers = false;
 
 bool		MyDatabaseHasLogoutEventTriggers = false;
+bool		MyDatabaseHasIdleTimeoutEventTriggers = false;
+bool		MyDatabaseHasStartupEventTriggers = false;
+bool		MyDatabaseHasShutdownEventTriggers = false;
 /*
  * DatabasePath is the path (relative to DataDir) of my database's
  * primary directory, ie, its directory in the default tablespace.

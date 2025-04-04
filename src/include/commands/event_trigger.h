@@ -64,6 +64,9 @@ extern void EventTriggerSQLDrop(Node *parsetree);
 extern void EventTriggerTableRewrite(Node *parsetree, Oid tableOid, int reason);
 extern void EventTriggerOnLogin(void);
 extern void EventTriggerOnLogout(void);
+extern void EventTriggerOnIdleTimeout(void);
+extern void EventTriggerOnStartup(void);
+extern void EventTriggerOnShutdown(void);
 
 extern bool EventTriggerBeginCompleteQuery(void);
 extern void EventTriggerEndCompleteQuery(void);

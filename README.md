@@ -1,5 +1,10 @@
 # pg_eventtrig_ext
 It's an experiment to add more event trigger types in PostgreSQL.
+
+1. logout
+
+2. idle_timeout
+
 PostgreSQL Database Management System
 =====================================
 

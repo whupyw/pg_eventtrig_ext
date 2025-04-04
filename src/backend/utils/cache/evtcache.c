@@ -170,6 +170,12 @@ BuildEventTriggerCache(void)
 			event = EVT_Login;
 		else if (strcmp(evtevent, "logout") == 0)
 			event = EVT_Logout;
+		else if (strcmp(evtevent, "idle_timeout") == 0)
+			event = EVT_IdleTimeout;
+		else if (strcmp(evtevent, "startup") == 0)
+			event = EVT_Startup;
+		else if (strcmp(evtevent, "shutdown") == 0)
+			event = EVT_Shutdown;
 		else
 			continue;
 

@@ -59,7 +59,7 @@ int			StatementTimeout = 0;
 int			LockTimeout = 0;
 int			IdleInTransactionSessionTimeout = 0;
 int			TransactionTimeout = 0;
-int			IdleSessionTimeout = 0;
+int			IdleSessionTimeout = 0;		// 改为10000，为会话空闲超时时间为10s
 bool		log_lock_waits = false;
 
 /* Pointer to this process's PGPROC struct, if any */

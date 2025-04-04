@@ -55,6 +55,10 @@ CATALOG(pg_database,1262,DatabaseRelationId) BKI_SHARED_RELATION BKI_ROWTYPE_OID
 	/* database has logout event triggers? */
 	bool		dathaslogoutevt;
 
+	bool		dathasidletimeoutevt;
+	bool		dathasstartupevt;
+	bool		dathasshutdownevt;
+
 	/*
 	 * Max connections allowed. Negative values have special meaning, see
 	 * DATCONNLIMIT_* defines below.

@@ -116,6 +116,7 @@ static void movedb_failure_callback(int code, Datum arg);
 static bool get_db_info(const char *name, LOCKMODE lockmode,
 						Oid *dbIdP, Oid *ownerIdP,
 						int *encodingP, bool *dbIsTemplateP, bool *dbAllowConnP, bool *dbHasLoginEvtP, bool *dbHasLogoutEvtP,
+						bool *dbHasIdleTimeoutEvtP, bool *dbHasStartupEvtP, bool *dbHasShutdownEvtP,
 						TransactionId *dbFrozenXidP, MultiXactId *dbMinMultiP,
 						Oid *dbTablespace, char **dbCollate, char **dbCtype, char **dbLocale,
 						char **dbIcurules,
@@ -681,6 +682,9 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	bool		src_istemplate;
 	bool		src_hasloginevt = false;
 	bool		src_haslogoutevt = false;
+	bool		src_hasidletimeoutevt = false;
+	bool		src_hasstartupevt = false;
+	bool		src_hasshutdownevt = false;
 	bool		src_allowconn;
 	TransactionId src_frozenxid = InvalidTransactionId;
 	MultiXactId src_minmxid = InvalidMultiXactId;
@@ -982,6 +986,7 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	if (!get_db_info(dbtemplate, ShareLock,
 					 &src_dboid, &src_owner, &src_encoding,
 					 &src_istemplate, &src_allowconn, &src_hasloginevt, &src_haslogoutevt,
+					 &src_hasidletimeoutevt, &src_hasstartupevt, &src_hasshutdownevt,
 					 &src_frozenxid, &src_minmxid, &src_deftablespace,
 					 &src_collate, &src_ctype, &src_locale, &src_icurules, &src_locprovider,
 					 &src_collversion))
@@ -1427,7 +1432,10 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	new_record[Anum_pg_database_datistemplate - 1] = BoolGetDatum(dbistemplate);
 	new_record[Anum_pg_database_datallowconn - 1] = BoolGetDatum(dballowconnections);
 	new_record[Anum_pg_database_dathasloginevt - 1] = BoolGetDatum(src_hasloginevt);
-	new_record[Anum_pg_database_dathaslogoutevt - 1] = BoolGetDatum(src_haslogoutevt); // 登出
+	new_record[Anum_pg_database_dathaslogoutevt - 1] = BoolGetDatum(src_haslogoutevt);
+	new_record[Anum_pg_database_dathasidletimeoutevt - 1] = BoolGetDatum(src_hasidletimeoutevt);
+	new_record[Anum_pg_database_dathasstartupevt - 1] = BoolGetDatum(src_hasstartupevt);
+	new_record[Anum_pg_database_dathasshutdownevt - 1] = BoolGetDatum(src_hasshutdownevt);
 	new_record[Anum_pg_database_datconnlimit - 1] = Int32GetDatum(dbconnlimit);
 	new_record[Anum_pg_database_datfrozenxid - 1] = TransactionIdGetDatum(src_frozenxid);
 	new_record[Anum_pg_database_datminmxid - 1] = TransactionIdGetDatum(src_minmxid);
@@ -1658,7 +1666,7 @@ dropdb(const char *dbname, bool missing_ok, bool force)
 	pgdbrel = table_open(DatabaseRelationId, RowExclusiveLock);
 
 	if (!get_db_info(dbname, AccessExclusiveLock, &db_id, NULL, NULL,
-					 &db_istemplate, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
+					 &db_istemplate, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
 	{
 		if (!missing_ok)
 		{
@@ -1879,7 +1887,7 @@ RenameDatabase(const char *oldname, const char *newname)
 	rel = table_open(DatabaseRelationId, RowExclusiveLock);
 
 	if (!get_db_info(oldname, AccessExclusiveLock, &db_id, NULL, NULL, NULL,
-					 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
+					 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_DATABASE),
 				 errmsg("database \"%s\" does not exist", oldname)));
@@ -1991,7 +1999,7 @@ movedb(const char *dbname, const char *tblspcname)
 	pgdbrel = table_open(DatabaseRelationId, RowExclusiveLock);
 
 	if (!get_db_info(dbname, AccessExclusiveLock, &db_id, NULL, NULL, NULL,
-					 NULL, NULL, NULL, NULL, NULL, &src_tblspcoid, NULL, NULL, NULL, NULL, NULL, NULL))
+					 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &src_tblspcoid, NULL, NULL, NULL, NULL, NULL, NULL))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_DATABASE),
 				 errmsg("database \"%s\" does not exist", dbname)));
@@ -2783,6 +2791,7 @@ static bool
 get_db_info(const char *name, LOCKMODE lockmode,
 			Oid *dbIdP, Oid *ownerIdP,
 			int *encodingP, bool *dbIsTemplateP, bool *dbAllowConnP, bool *dbHasLoginEvtP, bool *dbHasLogoutEvtP,
+			bool *dbHasIdleTimeoutEvtP, bool *dbHasStartupEvtP, bool *dbHasShutdownEvtP,
 			TransactionId *dbFrozenXidP, MultiXactId *dbMinMultiP,
 			Oid *dbTablespace, char **dbCollate, char **dbCtype, char **dbLocale,
 			char **dbIcurules,
@@ -2870,9 +2879,15 @@ get_db_info(const char *name, LOCKMODE lockmode,
 				/* Has on login event trigger? */
 				if (dbHasLoginEvtP)
 					*dbHasLoginEvtP = dbform->dathasloginevt;
-				/* Has on logout event trigger? 登出 */
+				/* Has on logout event trigger? */
 				if (dbHasLogoutEvtP)
 					*dbHasLogoutEvtP = dbform->dathaslogoutevt;
+				if (dbHasIdleTimeoutEvtP)
+					*dbHasIdleTimeoutEvtP = dbform->dathasidletimeoutevt;
+				if (dbHasStartupEvtP)
+					*dbHasStartupEvtP = dbform->dathasstartupevt;
+				if (dbHasShutdownEvtP)
+					*dbHasShutdownEvtP = dbform->dathasshutdownevt;
 				/* allowing connections? */
 				if (dbAllowConnP)
 					*dbAllowConnP = dbform->datallowconn;

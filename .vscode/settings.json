@@ -6,6 +6,9 @@
         "logging.h": "c",
         "string.h": "c",
         "sinval.h": "c",
-        "procsignal.h": "c"
+        "procsignal.h": "c",
+        "htup_details.h": "c",
+        "postgres.h": "c",
+        "heapam.h": "c"
     }
 }
