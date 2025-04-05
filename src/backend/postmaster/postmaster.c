@@ -1662,11 +1662,6 @@ ServerLoop(void)
 			 * WaitEventSetWait().
 			 */
 			if (pending_pm_shutdown_request)
-				//cjwcjw
-				// EventTriggerOnShutdown();
-				// fputs((_("cjwcjwcjwshutdown112233\n")), stdout);
-				// fflush(stdout);
-
 				process_pm_shutdown_request();
 			if (pending_pm_reload_request)
 				process_pm_reload_request();

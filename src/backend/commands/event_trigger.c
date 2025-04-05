@@ -1411,57 +1411,11 @@ EventTriggerOnShutdown(void)
 	List	   *runlist;
 	EventTriggerData trigdata;
 
-	// fputs((_("EventTriggerOnShutdown111\n")), stdout);
-	// fflush(stdout);
-
-	// if(IsUnderPostmaster){
-	// 	fputs((_("IsUnderPostmaster=true\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// else{
-	// 	fputs((_("IsUnderPostmaster=false\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// if(event_triggers){
-	// 	fputs((_("event_triggers=true\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// else{
-	// 	fputs((_("event_triggers=false\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// if(OidIsValid(MyDatabaseId)){
-	// 	fputs((_("OidIsValid(MyDatabaseId) =true\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// else{
-	// 	fputs((_("OidIsValid(MyDatabaseId) =false\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// if(MyDatabaseHasShutdownEventTriggers){
-	// 	fputs((_("MyDatabaseHasShutdownEventTriggers=true\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	// else{
-	// 	fputs((_("MyDatabaseHasShutdownEventTriggers=false\n")), stdout);
-	// 	fflush(stdout);
-	// }
-	//输出：IsUnderPostmaster=true、event_triggers=true、OidIsValid(MyDatabaseId) =false、MyDatabaseHasShutdownEventTriggers=false
-
-	// if (!IsUnderPostmaster || !event_triggers || !OidIsValid(MyDatabaseId) || !MyDatabaseHasShutdownEventTriggers)	
-	// 	return;
-
 	if (!IsUnderPostmaster || !event_triggers)	
 		return;
 
 	StartTransactionCommand();
-	// 可执行到
 	runlist = EventTriggerCommonSetup(NULL,	EVT_Shutdown, "shutdown", &trigdata, false);
-	// 执行不到：FATAL:  cannot read pg_class without having selected a database。
-	// 注释掉上面的FATAL：LOG:  background worker "logical replication launcher" (PID 41336) was terminated by signal 11: Segmentation fault
-	fputs((_("EventTriggerOnShutdown222\n")), stdout);
-	fflush(stdout);
-
 
 	if (runlist != NIL){
 		PushActiveSnapshot(GetTransactionSnapshot());
