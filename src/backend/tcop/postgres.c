@@ -2998,6 +2998,12 @@ quickdie(SIGNAL_ARGS)
 void
 die(SIGNAL_ARGS)
 {
+	EventTriggerOnShutdown();
+	ereport(WARNING,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("cjwcjw:die(SIGNAL_ARGS)")));
+
+
 	/* Don't joggle the elbow of proc_exit */
 	if (!proc_exit_inprogress)
 	{

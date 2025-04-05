@@ -2371,7 +2371,7 @@ process_pm_child_exit(void)
 	while ((pid = waitpid(-1, &exitstatus, WNOHANG)) > 0)
 	{
 		/*
-		 * Check if this child was a startup process.
+		 * Check if this child was a startup process. startup进程退出时执行
 		 */
 		if (pid == StartupPID)
 		{

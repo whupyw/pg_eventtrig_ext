@@ -1,0 +1,54 @@
+DROP TABLE system_shutdown;
+DROP EVENT TRIGGER on_shutdown_trigger;
+DROP FUNCTION on_shutdown_proc();
+
+CREATE TABLE system_shutdown (
+    id SERIAL PRIMARY KEY,
+    shutdown_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE FUNCTION on_shutdown_proc() RETURNS EVENT_TRIGGER AS $$
+DECLARE
+BEGIN
+    INSERT INTO system_shutdown (shutdown_time)
+    VALUES (CURRENT_TIMESTAMP);
+END;
+$$ LANGUAGE plpgsql;
+
+    RAISE NOTICE 'Bye!!!!!!!!';
+    RAISE NOTICE 'System shutdown at %', CURRENT_TIMESTAMP;
+
+CREATE EVENT TRIGGER on_shutdown_trigger ON shutdown EXECUTE PROCEDURE on_shutdown_proc();
+
+ALTER EVENT TRIGGER on_shutdown_trigger ENABLE ALWAYS;
+
+SELECT * FROM system_shutdown;
+
+---------------
+ps aux | grep postgres
+
+cjw          864  0.0  0.0   2892   956 pts/6    Ss+  12:04   0:00 /bin/sh -c cd '/home/cjw/postgreSQL/postgresql-17.3' && /bin/sh
+cjw        30420  0.0  0.1 197184 20984 ?        Ss   22:31   0:00 /usr/local/pgsql/bin/postgres -D /usr/local/pgsql/data
+第二行cjw后面的30420是pid
+
+SIGTERM（智能关闭模式）不允许新的连接，但允许现有会话正常结束。
+kill -TERM <postgres_pid>
+这个不行
+
+SIGINT（快速关闭模式）立即终止所有连接，未完成的事务将被中止。
+kill -INT <postgres_pid>
+这个可以
+postgres=# SELECT * FROM system_shutdown;
+ id |         shutdown_time         
+----+-------------------------------
+  1 | 2025-04-06 00:02:00.937938+08
+(1 row)
+
+SIGQUIT（立即关闭模式）立即停止服务器，不等待会话结束。下次启动时需要进行崩溃恢复。
+kill -QUIT <postgres_pid>
+这个不知道（但是这个不会清除共享内存等资源，不常用）
+
+--------------
+SELECT dathasshutdownevt FROM pg_database WHERE datname= :'DBNAME';
+
+SELECT * FROM pg_event_trigger;
