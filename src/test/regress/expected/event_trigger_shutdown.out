@@ -46,7 +46,8 @@ postgres=# SELECT * FROM system_shutdown;
 
 SIGQUIT（立即关闭模式）立即停止服务器，不等待会话结束。下次启动时需要进行崩溃恢复。
 kill -QUIT <postgres_pid>
-这个不知道（但是这个不会清除共享内存等资源，不常用）
+或者：/usr/local/pgsql/bin/pg_ctl stop -D /usr/local/pgsql/data
+这个不行
 
 --------------
 SELECT dathasshutdownevt FROM pg_database WHERE datname= :'DBNAME';
