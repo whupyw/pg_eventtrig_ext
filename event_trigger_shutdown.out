@@ -15,9 +15,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-    RAISE NOTICE 'Bye!!!!!!!!';
-    RAISE NOTICE 'System shutdown at %', CURRENT_TIMESTAMP;
-
 CREATE EVENT TRIGGER on_shutdown_trigger ON shutdown EXECUTE PROCEDURE on_shutdown_proc();
 
 ALTER EVENT TRIGGER on_shutdown_trigger ENABLE ALWAYS;
